@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const { sendTelegramPhoto } = require("../utilities/request");
 const {
   getBetDisplay,
@@ -5,6 +7,10 @@ const {
 } = require("../serviceScreenshot/utils");
 
 const BET_INIT_AMOUNT = Number(process.env.SCREENSHOT_BET_INIT_AMOUNT || 5000);
+const SUBSCRIBER_STORE_PATH = path.resolve(
+  __dirname,
+  "../runtime/telegram-subscribers.json",
+);
 
 function pickRandomBetSide() {
   return Math.random() < 0.5 ? "B" : "P";
@@ -26,6 +32,33 @@ function resolveRoundFormatFromTriggerWinner(triggerWinner) {
   }
 
   return "UNKNOWN";
+}
+
+function getTargetChatIds() {
+  const chatIds = new Set();
+
+  try {
+    if (fs.existsSync(SUBSCRIBER_STORE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(SUBSCRIBER_STORE_PATH, "utf8"));
+      if (Array.isArray(parsed.chatIds)) {
+        parsed.chatIds
+          .map((chatId) => String(chatId || "").trim())
+          .filter(Boolean)
+          .forEach((chatId) => chatIds.add(chatId));
+      }
+    }
+  } catch (_error) {
+    // Keep fallback behavior below when the subscriber store is unreadable.
+  }
+
+  const fallbackChatId =
+    process.env.SCREENSHOT_TELEGRAM_CHAT_ID ||
+    process.env.ID_TELEGRAM_RECIPIENT;
+  if (fallbackChatId) {
+    chatIds.add(String(fallbackChatId).trim());
+  }
+
+  return Array.from(chatIds);
 }
 
 function buildBetPayload(roundFormat, state) {
@@ -104,13 +137,11 @@ async function sendScreenshotToTelegramInternal({
   captionPayload,
 }) {
   const token = process.env.TOKEN_BOT;
-  const idRecipient =
-    process.env.SCREENSHOT_TELEGRAM_CHAT_ID ||
-    process.env.ID_TELEGRAM_RECIPIENT;
+  const recipientChatIds = getTargetChatIds();
 
-  if (!token || !idRecipient) {
+  if (!token || recipientChatIds.length === 0) {
     log(
-      "Telegram screenshot delivery skipped: missing TOKEN_BOT or recipient chat id",
+      "Telegram screenshot delivery skipped: missing TOKEN_BOT or subscribed recipient chat ids",
     );
     return false;
   }
@@ -134,17 +165,29 @@ async function sendScreenshotToTelegramInternal({
     didWin: betLog.didWin,
   });
 
-  const sent = await sendTelegramPhoto(token, idRecipient, filePath, {
-    caption,
-  });
+  let successCount = 0;
 
-  if (sent) {
+  for (const recipientChatId of recipientChatIds) {
+    const sent = await sendTelegramPhoto(token, recipientChatId, filePath, {
+      caption,
+    });
+    if (sent) {
+      successCount += 1;
+    }
+  }
+
+  if (successCount > 0) {
     await removeFileIfExists(filePath);
-    log(`Telegram photo sent: ${filePath}`);
+    log(`Telegram photo sent: ${filePath}`, {
+      recipientCount: recipientChatIds.length,
+      successCount,
+    });
     return true;
   }
 
-  log(`Telegram photo send failed: ${filePath}`);
+  log(`Telegram photo send failed: ${filePath}`, {
+    recipientCount: recipientChatIds.length,
+  });
   return false;
 }
 

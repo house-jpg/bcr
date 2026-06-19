@@ -464,9 +464,14 @@ class BrowserSession {
 
   async open() {
     const userDataDir = `./servicePuppeteer/dataDir/${account.userDataDir}_screenshot_watcher`;
+    const unlimitedRetries = !Number.isFinite(autoLoginMaxAttempts) || autoLoginMaxAttempts <= 0;
 
-    for (let attempt = 1; attempt <= autoLoginMaxAttempts; attempt += 1) {
-      log(`Opening screenshot browser context (attempt ${attempt}/${autoLoginMaxAttempts})`);
+    for (let attempt = 1; unlimitedRetries || attempt <= autoLoginMaxAttempts; attempt += 1) {
+      log(
+        `Opening screenshot browser context (attempt ${attempt}/${
+          unlimitedRetries ? "unlimited" : autoLoginMaxAttempts
+        })`,
+      );
       await this.initializeContext(userDataDir, isHeadless);
 
       try {
@@ -478,7 +483,7 @@ class BrowserSession {
       } catch (error) {
         const isAutoLoginTimeout = error?.code === "AUTO_LOGIN_TIMEOUT";
         const isTableNotFound = error?.code === "TABLE_NOT_FOUND";
-        const isFinalAttempt = attempt >= autoLoginMaxAttempts;
+        const isFinalAttempt = !unlimitedRetries && attempt >= autoLoginMaxAttempts;
 
         await this.resetBrowserSession(
           isAutoLoginTimeout
@@ -494,7 +499,9 @@ class BrowserSession {
 
         log("Retrying browser bootstrap with a fresh browser session", {
           attempt,
-          remainingAttempts: autoLoginMaxAttempts - attempt,
+          remainingAttempts: unlimitedRetries
+            ? "unlimited"
+            : autoLoginMaxAttempts - attempt,
           reason: error.message,
         });
       }

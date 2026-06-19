@@ -25,6 +25,10 @@ module.exports = {
   SCREENSHOT_BOT_ENTRY: resolveScreenshotEntry(),
   BROWSER_HEADLESS: process.env.SCREENSHOT_BOT_HEADLESS || "false",
   STORE_PATH: path.resolve(__dirname, "../runtime/telegram-admin-store.json"),
+  SUBSCRIBER_STORE_PATH: path.resolve(
+    __dirname,
+    "../runtime/telegram-subscribers.json",
+  ),
   BOT_USERNAME: process.env.BOT_USERNAME || "",
   ADMIN_PANEL_USER_IDS: new Set(
     [process.env.OWNER_ID, process.env.ADMIN_ID, process.env.ADMIN_IDS]

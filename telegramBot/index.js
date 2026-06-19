@@ -10,8 +10,10 @@ const {
   SCREENSHOT_BOT_ENTRY,
   BROWSER_HEADLESS,
   STORE_PATH,
+  SUBSCRIBER_STORE_PATH,
 } = require("./config");
 const { createStore } = require("./store");
+const { createSubscriberStore } = require("./subscriberStore");
 const { createProcessManager } = require("./processManager");
 const { createAccessControl } = require("./access");
 const { registerHandlers } = require("./handlers");
@@ -33,9 +35,15 @@ const store = createStore({
   logError: (message) => process.stderr.write(`${message}\n`),
 });
 
+const subscriberStore = createSubscriberStore({
+  storePath: SUBSCRIBER_STORE_PATH,
+  logError: (message) => process.stderr.write(`${message}\n`),
+});
+
 const processManager = createProcessManager({
   screenshotEntry: SCREENSHOT_BOT_ENTRY,
   screenshotHeadless: BROWSER_HEADLESS,
+  subscriberStore,
 });
 
 const access = createAccessControl({
@@ -46,6 +54,7 @@ registerHandlers({
   bot,
   botState,
   store,
+  subscriberStore,
   processManager,
   access,
 });

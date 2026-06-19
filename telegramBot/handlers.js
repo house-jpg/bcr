@@ -7,6 +7,7 @@ const {
 function registerHandlers({
   bot,
   store,
+  subscriberStore,
   processManager,
   access,
 }) {
@@ -17,12 +18,45 @@ function registerHandlers({
     return patterns.some((pattern) => message.includes(pattern));
   }
 
+  function isNonFatalTelegramWriteError(error) {
+    return isIgnorableTelegramError(error, [
+      "not enough rights to send text messages to the chat",
+      "not enough rights to send photos to the chat",
+      "bot was kicked from the group chat",
+      "chat not found",
+      "forbidden: bot was blocked by the user",
+    ]);
+  }
+
   async function reply(chatId, text, options = {}) {
-    await bot.sendMessage(chatId, text, options);
+    try {
+      await bot.sendMessage(chatId, text, options);
+      return true;
+    } catch (error) {
+      if (isNonFatalTelegramWriteError(error)) {
+        process.stderr.write(
+          `[telegram-bot] sendMessage skipped for ${chatId}: ${error.message}\n`,
+        );
+        return false;
+      }
+
+      throw error;
+    }
   }
 
   async function sendProcessingMessage(chatId) {
-    return bot.sendMessage(chatId, "⌛️ Hệ thống đang xử lý...");
+    try {
+      return await bot.sendMessage(chatId, "⌛️ Hệ thống đang xử lý...");
+    } catch (error) {
+      if (isNonFatalTelegramWriteError(error)) {
+        process.stderr.write(
+          `[telegram-bot] processing message skipped for ${chatId}: ${error.message}\n`,
+        );
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   async function deleteTelegramMessage(chatId, messageId) {
@@ -39,6 +73,13 @@ function registerHandlers({
           "message can't be deleted",
         ])
       ) {
+        return;
+      }
+
+      if (isNonFatalTelegramWriteError(error)) {
+        process.stderr.write(
+          `[telegram-bot] deleteMessage skipped for ${chatId}: ${error.message}\n`,
+        );
         return;
       }
 
@@ -140,12 +181,19 @@ function registerHandlers({
           return;
         }
 
+        if (isNonFatalTelegramWriteError(error)) {
+          process.stderr.write(
+            `[telegram-bot] editMessageText skipped for ${chatId}: ${error.message}\n`,
+          );
+          return;
+        }
+
         throw error;
       }
       return;
     }
 
-    await bot.sendMessage(chatId, text, {
+    await reply(chatId, text, {
       reply_markup: replyMarkup,
     });
   }
@@ -180,14 +228,11 @@ function registerHandlers({
       case "panel:start": {
         const config = store.getChatConfig();
         try {
-          await processManager.startScreenshotProcess(config, {
-            recipientChatId: chatId,
-            targetTitle:
-              query.message.chat?.username ||
-              query.message.chat?.title ||
-              `chat-${chatId}`,
-          });
-          await answerCallback(query, "Đã start.");
+          await processManager.startScreenshotProcess(config);
+          await answerCallback(
+            query,
+            `Đã khởi động bot dùng chung cho ${subscriberStore.getChatIds().length} group.`,
+          );
           await sendOrEditPanel(chatId, query.message.message_id);
         } catch (error) {
           await answerCallback(query, error.message);
@@ -199,6 +244,7 @@ function registerHandlers({
         await sendOrEditPanel(chatId, query.message.message_id);
         return;
       case "panel:stop":
+        subscriberStore.clear();
         await processManager.stopScreenshotProcess();
         await answerCallback(query, "Đã stop.");
         await sendOrEditPanel(chatId, query.message.message_id);
@@ -215,18 +261,40 @@ function registerHandlers({
   async function startBotForChat(msg, startedByLabel) {
     const config = store.ensureChatConfig();
     const processingMessage = await sendProcessingMessage(msg.chat.id);
+    const chatId = String(msg.chat.id);
+    const isGroupTarget = access.isGroupChat(msg.chat);
+    const subscriberCountBeforeStart = subscriberStore.getChatIds().length;
+    let addedSubscription = false;
 
     try {
-      await processManager.startScreenshotProcess(config, {
-        recipientChatId: msg.chat.id,
-        targetTitle:
-          msg.chat.title || msg.chat.username || `chat-${msg.chat.id}`,
-      });
+      const wasSubscribed = isGroupTarget
+        ? subscriberStore.hasChatId(chatId)
+        : false;
+      if (isGroupTarget) {
+        addedSubscription = subscriberStore.addChatId(chatId);
+      }
+      const startedNewProcess = await processManager.startScreenshotProcess(config);
       await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
+      await reply(
+        msg.chat.id,
+        isGroupTarget
+          ? startedNewProcess
+            ? "Đã đăng ký nhận tín hiệu cho group này. Bot dùng chung đã được khởi động."
+            : wasSubscribed
+              ? "Group này đã đăng ký nhận tín hiệu từ trước."
+              : "Đã đăng ký group này nhận tín hiệu từ bot đang chạy."
+          : startedNewProcess
+            ? `Đã khởi động bot dùng chung cho ${subscriberCountBeforeStart} group đã đăng ký. Private chat này không nhận kết quả.`
+            : `Bot dùng chung đang chạy cho ${subscriberStore.getChatIds().length} group đã đăng ký. Private chat này không nhận kết quả.`,
+      );
       logGroupStartAttempt(msg, "started", {
         startedBy: startedByLabel,
+        subscriberCount: subscriberStore.getChatIds().length,
       });
     } catch (error) {
+      if (isGroupTarget && addedSubscription) {
+        subscriberStore.removeChatId(chatId);
+      }
       await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
       logGroupStartAttempt(msg, "failed", {
         startedBy: startedByLabel,
@@ -235,7 +303,7 @@ function registerHandlers({
       await reply(
         msg.chat.id,
         [
-          `Không thể start bot: ${error.message}`,
+          `Không thể đăng ký nhận tín hiệu: ${error.message}`,
           formatConfigMessage(config),
           msg.chat.type === "private"
             ? "Hãy cấu hình bàn, tổng lãi và tiền cược trong /panel trước."
@@ -311,9 +379,11 @@ function registerHandlers({
     const config = store.ensureChatConfig();
     await reply(
       msg.chat.id,
-      [processManager.buildStatusMessage(), formatConfigMessage(config)].join(
-        "\n\n",
-      ),
+      [
+        processManager.buildStatusMessage(),
+        `Số group đã đăng ký: ${subscriberStore.getChatIds().length}`,
+        formatConfigMessage(config),
+      ].join("\n\n"),
     );
   });
 
@@ -324,13 +394,52 @@ function registerHandlers({
     }
 
     const processingMessage = await sendProcessingMessage(msg.chat.id);
+    const chatId = String(msg.chat.id);
+    const isPrivateAdminStop = access.canUsePrivatePanel(msg) && msg.chat.type === "private";
 
     try {
-      const stopped = await processManager.stopScreenshotProcess();
-      await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
-      if (!stopped) {
-        await reply(msg.chat.id, "No screenshot flow is running.");
+      if (isPrivateAdminStop) {
+        subscriberStore.clear();
+        const stopped = await processManager.stopScreenshotProcess();
+        await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
+        await reply(
+          msg.chat.id,
+          stopped
+            ? "Đã stop bot toàn cục và xóa toàn bộ group đã đăng ký."
+            : "Hiện không có bot nào đang chạy. Danh sách group đã đăng ký cũng đã được xóa.",
+        );
+        return;
       }
+
+      const wasSubscribed = subscriberStore.removeChatId(chatId);
+      const remainingSubscribers = subscriberStore.getChatIds().length;
+      let stopped = false;
+
+      if (remainingSubscribers === 0) {
+        stopped = await processManager.stopScreenshotProcess();
+      }
+
+      await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
+
+      if (!wasSubscribed) {
+        await reply(msg.chat.id, "Group này chưa đăng ký nhận tín hiệu.");
+        return;
+      }
+
+      if (remainingSubscribers === 0) {
+        await reply(
+          msg.chat.id,
+          stopped
+            ? "Đã hủy đăng ký group này và dừng bot vì không còn group nào theo dõi."
+            : "Đã hủy đăng ký group này. Hiện không có bot nào đang chạy.",
+        );
+        return;
+      }
+
+      await reply(
+        msg.chat.id,
+        `Đã hủy đăng ký group này. Bot vẫn tiếp tục chạy cho ${remainingSubscribers} group còn lại.`,
+      );
     } catch (error) {
       await deleteTelegramMessage(msg.chat.id, processingMessage.message_id);
       await reply(msg.chat.id, `Không thể stop bot: ${error.message}`);

@@ -30,7 +30,7 @@ module.exports = {
     process.env.SCREENSHOT_AUTO_LOGIN_TIMEOUT_MS || 120000,
   ),
   autoLoginMaxAttempts: Number(
-    process.env.SCREENSHOT_AUTO_LOGIN_MAX_ATTEMPTS || 2,
+    process.env.SCREENSHOT_AUTO_LOGIN_MAX_ATTEMPTS || 0,
   ),
   defaultTimeout: Number(process.env.SCREENSHOT_DEFAULT_TIMEOUT_MS || 60000),
   seamlessFrameTimeoutMs: Number(
@@ -53,7 +53,7 @@ module.exports = {
   gameInfoCardTimeoutMs: Number(
     process.env.SCREENSHOT_GAMEINFO_TIMEOUT_MS || 0,
   ),
-  screenshotRetryCount: Number(process.env.SCREENSHOT_RETRY_COUNT || 2),
+  screenshotRetryCount: Number(process.env.SCREENSHOT_RETRY_COUNT || 0),
   screenshotRetryDelayMs: Number(process.env.SCREENSHOT_RETRY_DELAY_MS || 800),
   skipFirstDetectedUpdate:
     process.env.SCREENSHOT_SKIP_FIRST_DETECTED_UPDATE !== "false",
@@ -86,10 +86,10 @@ module.exports = {
   recoveryTableName:
     process.env.BOT_INIT_TABLE_NAME || process.env.SCREENSHOT_TABLE_NAME || "",
   gameInfoCardRecoveryTimeoutMs: Number(
-    process.env.SCREENSHOT_GAMEINFO_RECOVERY_TIMEOUT_MS || 30000,
+    process.env.SCREENSHOT_GAMEINFO_RECOVERY_TIMEOUT_MS || 15000,
   ),
   gameFrameRecoveryTimeoutMs: Number(
-    process.env.SCREENSHOT_GAMEFRAME_RECOVERY_TIMEOUT_MS || 30000,
+    process.env.SCREENSHOT_GAMEFRAME_RECOVERY_TIMEOUT_MS || 15000,
   ),
   tableSelector:
     process.env.SCREENSHOT_TABLE_SELECTOR || process.env.CLICK_IN_TABLE_GAME,

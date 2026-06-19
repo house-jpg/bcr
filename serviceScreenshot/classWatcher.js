@@ -5,9 +5,9 @@ const {
   gameInfoCardRecoveryTimeoutMs,
   outputDir,
   recoveryTableName,
-  tempOutputDir,
   screenshotRetryCount,
   screenshotRetryDelayMs,
+  tempOutputDir,
   workerId,
   targetTableName,
   watchPollIntervalMs,
@@ -40,9 +40,19 @@ function shouldRefreshFrameAfterCaptureError(error) {
   const message = String(error?.message || "");
   return (
     isTransientFrameError(error) ||
+    message.includes("to be visible") ||
     message.includes("element is not visible") ||
     message.includes("waiting for element to be stable") ||
     message.includes("scroll into view action")
+  );
+}
+
+function isHiddenGameInfoCardError(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("waiting for locator('#gameInfoCard').first() to be visible") ||
+    message.includes("locator('#gameInfoCard').first() to be visible") ||
+    message.includes("resolved to hidden")
   );
 }
 
@@ -352,8 +362,14 @@ class ScreenshotClassWatcher {
     let lastError;
     const visibilityTimeoutMs =
       gameInfoCardTimeoutMs > 0 ? Math.min(gameInfoCardTimeoutMs, 4000) : 4000;
+    const unlimitedRetries =
+      !Number.isFinite(screenshotRetryCount) || screenshotRetryCount <= 0;
 
-    for (let attempt = 1; attempt <= screenshotRetryCount + 1; attempt += 1) {
+    for (
+      let attempt = 1;
+      unlimitedRetries || attempt <= screenshotRetryCount + 1;
+      attempt += 1
+    ) {
       try {
         await this.browser.refreshGameFrame();
         await this.browser.closeOverlays();
@@ -382,13 +398,29 @@ class ScreenshotClassWatcher {
       } catch (error) {
         lastError = error;
 
-        if (attempt > screenshotRetryCount) {
+        if (isHiddenGameInfoCardError(error)) {
+          if (!this.missingGameInfoCardSince) {
+            this.missingGameInfoCardSince = Date.now();
+          }
+
+          await this.recoverMissingGameInfoCardIfNeeded({
+            hasVisibleGameInfoCard: false,
+            hasGameInfoCard: true,
+          });
+        }
+
+        if (!unlimitedRetries && attempt > screenshotRetryCount) {
           break;
         }
 
-        log(`Class watcher screenshot retry ${attempt}/${screenshotRetryCount}`, {
-          reason: error.message,
-        });
+        log(
+          `Class watcher screenshot retry ${attempt}/${
+            unlimitedRetries ? "unlimited" : screenshotRetryCount
+          }`,
+          {
+            reason: error.message,
+          },
+        );
 
         if (shouldRefreshFrameAfterCaptureError(error)) {
           await this.browser.refreshGameFrame().catch(() => {});
