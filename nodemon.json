@@ -1,0 +1,22 @@
+{
+  "legacyWatch": true,
+  "watch": [
+    ".env",
+    "config",
+    "controllers",
+    "routers",
+    "scripts",
+    "server.js",
+    "servicePuppeteer",
+    "serviceScreenshot",
+    "telegramBot",
+    "utilities"
+  ],
+  "ignore": [
+    "logs/**",
+    "node_modules/**",
+    "runtime/**",
+    "screenshots/**"
+  ],
+  "ext": "js,json,env"
+}

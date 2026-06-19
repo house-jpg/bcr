@@ -1,0 +1,17 @@
+services:
+  bcrlive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bcrlive
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${SERVER_PORT:-3201}:${SERVER_PORT:-3201}"
+    shm_size: "1gb"
+    volumes:
+      - ./logs:/app/logs
+      - ./runtime:/app/runtime
+      - ./screenshots:/app/screenshots
+      - ./servicePuppeteer/dataDir:/app/servicePuppeteer/dataDir

@@ -1,0 +1,8 @@
+# /logs/*
+/servicePuppeteer/dataDir/*
+/node_modules
+# /utilities/image_temp/*
+eng.traineddata
+package-lock.json
+/test
+server.backup.js
