@@ -6,3 +6,5 @@ eng.traineddata
 package-lock.json
 /test
 server.backup.js
+.env
+/runtime/telegram-admin-store.json

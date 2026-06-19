@@ -1,12 +1,12 @@
 {
   "version": 2,
   "sharedConfig": {
-    "tableName": "C05",
+    "tableName": "C06",
     "betConfig": {
-      "total": 3000000,
+      "total": 6000000,
       "betInit": 5000
     },
     "enabled": false,
-    "updatedAt": "2026-06-07T07:36:15.245Z"
+    "updatedAt": "2026-06-19T05:29:19.584Z"
   }
 }

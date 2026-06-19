@@ -488,11 +488,15 @@ class BrowserSession {
             : `bootstrap failure on attempt ${attempt}: ${error.message}`,
         );
 
-        if ((!isAutoLoginTimeout && !isTableNotFound) || isFinalAttempt) {
+        if (isFinalAttempt) {
           throw error;
         }
 
-        log("Retrying browser bootstrap with a fresh browser session");
+        log("Retrying browser bootstrap with a fresh browser session", {
+          attempt,
+          remainingAttempts: autoLoginMaxAttempts - attempt,
+          reason: error.message,
+        });
       }
     }
 
