@@ -7,6 +7,12 @@ const fs = require("fs").promises;
 
 const { request, imageCapcha, helper } = require("../utilities");
 const { account_3: account } = require("./account.puppeteer");
+const {
+  attachDomainGuardToContext,
+  closePagesOutsideDomain,
+  enforcePageDomain,
+  normalizeConfiguredDomain,
+} = require("./domainGuard");
 const { persistSessionHeartbeat } = require("./sessionHeartbeat");
 
 let isCollecting = false;
@@ -24,6 +30,7 @@ const username_game = account.username_game;
 const password_game = account.password_game;
 const nameServiceSocket = account.nameServiceSocket;
 const logsNameProgress = account.logsNameProgress;
+const configuredDomain = normalizeConfiguredDomain(process.env.DOMAIN);
 
 // Khởi tạo socket
 socket = io(`${process.env.SERVER_HOSTNAME}:${process.env.SERVER_PORT}`);
@@ -102,8 +109,20 @@ async function main() {
       "User-Agent": UA,
     });
 
+    await closePagesOutsideDomain(context, configuredDomain, async (message) => {
+      await helper.appendToLog(message, logsNameProgress);
+    });
+
     // Tạo page từ context
     page = await context.newPage();
+    attachDomainGuardToContext(
+      context,
+      configuredDomain,
+      async (message) => {
+        await helper.appendToLog(message, logsNameProgress);
+      },
+      { primaryPage: page, throwOnMainFrameMismatch: true }
+    );
 
     // Xử lý các dialog
     page.on("dialog", async (dialog) => {
@@ -178,6 +197,14 @@ async function main() {
       waitUntil: "networkidle",
       timeout: 180000,
     });
+    await enforcePageDomain(
+      page,
+      configuredDomain,
+      async (message) => {
+        await helper.appendToLog(message, logsNameProgress);
+      },
+      { closePageOnMismatch: false, throwOnMismatch: true, reason: "initial-goto" }
+    );
 
     // await page.goto(process.env.DOMAIN, { timeout: 60000 });
 

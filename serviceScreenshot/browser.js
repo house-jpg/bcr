@@ -28,8 +28,16 @@ const {
   manualWaitRetryMs,
   recoveryTableName,
 } = require("./config");
+const {
+  attachDomainGuardToContext,
+  closePagesOutsideDomain,
+  enforcePageDomain,
+  normalizeConfiguredDomain,
+} = require("../servicePuppeteer/domainGuard");
 const { log } = require("./logger");
 const { sleep } = require("./utils");
+
+const configuredDomain = normalizeConfiguredDomain(process.env.DOMAIN);
 
 function createAutoLoginTimeoutError(timeoutMs) {
   const error = new Error(
@@ -440,7 +448,14 @@ class BrowserSession {
       });
     });
 
+    await closePagesOutsideDomain(this.browserContext, configuredDomain, async (message) => {
+      log(message);
+    });
+
     this.page = this.browserContext.pages()[0] || (await this.browserContext.newPage());
+    attachDomainGuardToContext(this.browserContext, configuredDomain, async (message) => {
+      log(message);
+    }, { primaryPage: this.page, throwOnMainFrameMismatch: true });
     this.page.on("dialog", async (dialog) => {
       await dialog.dismiss().catch(() => {});
     });
@@ -526,6 +541,9 @@ class BrowserSession {
       waitUntil: "domcontentloaded",
       timeout: defaultTimeout,
     });
+    await enforcePageDomain(this.page, configuredDomain, async (message) => {
+      log(message);
+    }, { closePageOnMismatch: false, throwOnMismatch: true, reason: "manual-open" });
     log("Manual mode browser is ready. User can login and navigate to #gameInfoCard");
   }
 
@@ -764,6 +782,9 @@ class BrowserSession {
       waitUntil: "networkidle",
       timeout: defaultTimeout,
     });
+    await enforcePageDomain(this.page, configuredDomain, async (message) => {
+      log(message);
+    }, { closePageOnMismatch: false, throwOnMismatch: true, reason: "login-goto" });
     log("Domain loaded");
 
     log("Dismissing root overlays before login");
