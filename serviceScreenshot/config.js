@@ -91,8 +91,7 @@ module.exports = {
   gameFrameRecoveryTimeoutMs: Number(
     process.env.SCREENSHOT_GAMEFRAME_RECOVERY_TIMEOUT_MS || 15000,
   ),
-  tableSelector:
-    process.env.SCREENSHOT_TABLE_SELECTOR || process.env.CLICK_IN_TABLE_GAME,
+  tableSelector: process.env.CLICK_IN_TABLE_GAME || "",
   useChangeStream: process.env.SCREENSHOT_USE_CHANGE_STREAM !== "false",
   isHeadless:
     String(process.env.AUTO_LOGIN || "").toLowerCase() === "true"

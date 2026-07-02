@@ -21,12 +21,10 @@ const {
   seamlessFrameTimeoutMs,
   tableOpenWaitMs,
   tableSelector,
-  targetTableName,
   visibleTimeoutMs,
   hallNotificationWaitMs,
   manualOpenUrl,
   manualWaitRetryMs,
-  recoveryTableName,
 } = require("./config");
 const {
   attachDomainGuardToContext,
@@ -44,14 +42,6 @@ function createAutoLoginTimeoutError(timeoutMs) {
     `Auto login timed out after ${timeoutMs}ms and the browser session was reset.`,
   );
   error.code = "AUTO_LOGIN_TIMEOUT";
-  return error;
-}
-
-function createTableNotFoundError(tableName, attempts) {
-  const error = new Error(
-    `Unable to find table ${tableName} after ${attempts} scroll attempts.`,
-  );
-  error.code = "TABLE_NOT_FOUND";
   return error;
 }
 
@@ -237,13 +227,6 @@ function isTransientFrameError(error) {
   );
 }
 
-function normalizeTableLabel(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
 async function getFreshContentFrame(parentFrame, selector, timeout = frameTimeoutMs) {
   try {
     await waitForFrame(parentFrame, selector, timeout);
@@ -278,144 +261,14 @@ async function getFreshContentFrame(parentFrame, selector, timeout = frameTimeou
   throw new Error(`Unable to resolve content frame for ${selector}`);
 }
 
-async function resolveTableHandleByName(frame, tableName) {
-  const normalizedTableName = normalizeTableLabel(tableName);
-  const textCandidates = [
-    frame.getByText(tableName, { exact: true }).first(),
-    frame.getByText(tableName).first(),
-    frame.locator(`[title="${tableName}"]`).first(),
-    frame.locator(`[aria-label="${tableName}"]`).first(),
-  ];
+function getRequiredTableSelector() {
+  const selector = String(tableSelector || "").trim();
 
-  for (const candidate of textCandidates) {
-    try {
-      await candidate.waitFor({ timeout: 1500, state: "visible" });
-      const handle = await candidate.evaluateHandle((node) => {
-        return (
-          node.closest(
-            'button, [role="button"], .cursor-pointer, [class*="cursor-pointer"]',
-          ) || node
-        );
-      });
-      const element = handle.asElement();
-      if (element) {
-        return element;
-      }
-    } catch (_error) {
-      // Try the next strategy.
-    }
+  if (!selector) {
+    throw new Error("Missing CLICK_IN_TABLE_GAME in environment");
   }
 
-  try {
-    const handle = await frame.evaluateHandle((name) => {
-      const normalizedName = String(name || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "");
-      const nodes = Array.from(document.querySelectorAll("*"));
-
-      for (const node of nodes) {
-        const text = (node.textContent || "")
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "");
-        if (!text || !text.includes(normalizedName)) {
-          continue;
-        }
-
-        const clickable =
-          node.closest(
-            'button, [role="button"], .cursor-pointer, [class*="cursor-pointer"]',
-          ) || node;
-
-        if (!(clickable instanceof HTMLElement)) {
-          continue;
-        }
-
-        const style = window.getComputedStyle(clickable);
-        const rect = clickable.getBoundingClientRect();
-        const isVisible =
-          style.visibility !== "hidden" &&
-          style.display !== "none" &&
-          rect.width > 0 &&
-          rect.height > 0;
-
-        if (isVisible) {
-          return clickable;
-        }
-      }
-
-      return null;
-    }, normalizedTableName);
-
-    const element = handle.asElement();
-    if (element) {
-      return element;
-    }
-  } catch (_error) {
-    // Fall through to selector fallback.
-  }
-
-  return null;
-}
-
-async function scrollHallList(frame, ratio) {
-  await frame.evaluate((nextRatio) => {
-    const candidates = Array.from(document.querySelectorAll("*")).filter(
-      (node) => node instanceof HTMLElement,
-    );
-    const prioritizedScroller = candidates.find((node) => {
-      const className = String(node.className || "");
-      const hasScrollableHeight = node.scrollHeight - node.clientHeight > 24;
-      return (
-        hasScrollableHeight &&
-        (className.includes("vue-recycle-scroller") ||
-          className.includes("recycle-scroller__item-wrapper") ||
-          className.includes("recycle-scroller") ||
-          className.includes("scroll"))
-      );
-    });
-    const fallbackScroller = candidates.find((node) => {
-      const style = window.getComputedStyle(node);
-      const overflowY = style.overflowY || "";
-      return (
-        node.scrollHeight - node.clientHeight > 24 &&
-        (overflowY === "auto" || overflowY === "scroll")
-      );
-    });
-    const scroller = prioritizedScroller || fallbackScroller || document.scrollingElement;
-
-    if (!(scroller instanceof HTMLElement)) {
-      return;
-    }
-
-    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    const nextScrollTop = Math.round(maxScrollTop * nextRatio);
-    scroller.scrollTop = nextScrollTop;
-    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-  }, ratio);
-
-  await sleep(postFrameDelayMs);
-}
-
-async function clickElementHandleWithRetry(elementHandle, options = {}) {
-  const { timeout = actionTimeoutMs, clickCount = 1, forceOnFailure = true } = options;
-
-  await elementHandle.scrollIntoViewIfNeeded().catch(() => {});
-
-  try {
-    await elementHandle.click({ timeout, clickCount });
-    await sleep(interactionDelayMs);
-    return true;
-  } catch (error) {
-    if (!forceOnFailure) {
-      throw error;
-    }
-
-    await elementHandle.click({ timeout, clickCount, force: true });
-    await sleep(interactionDelayMs);
-    return true;
-  }
+  return selector;
 }
 
 class BrowserSession {
@@ -861,21 +714,17 @@ class BrowserSession {
   }
 
   async reenterConfiguredTable(reason = "gameInfoCard not found in time") {
-    const nextTableName = recoveryTableName || targetTableName;
+    const selector = getRequiredTableSelector();
 
-    if (!nextTableName) {
-      throw new Error("Missing configured table name for gameInfoCard recovery");
-    }
-
-    log(`Re-entering configured table after recovery trigger: ${nextTableName}`, {
+    log(`Re-entering configured table by selector after recovery trigger: ${selector}`, {
       reason,
     });
-    await this.enterTargetTable({ preferredTableName: nextTableName });
+    await this.enterTargetTable();
   }
 
-  async enterTargetTable(options = {}) {
-    const { preferredTableName = targetTableName } = options;
+  async enterTargetTable() {
     const seamlessIframeSelector = "#app iframe#seamless-game";
+    const selector = getRequiredTableSelector();
 
     const seamlessFrame = await getFreshContentFrame(
       this.page,
@@ -929,49 +778,14 @@ class BrowserSession {
     ]);
     log("Overlays closed before selecting table");
 
-    let enteredByName = false;
-
-    if (preferredTableName) {
-      log(`Trying to enter table by name: ${preferredTableName}`);
-      for (let attempt = 1; attempt <= 8; attempt += 1) {
-        const tableHandle = await resolveTableHandleByName(
-          gameHallFrame,
-          preferredTableName,
-        );
-
-        if (tableHandle) {
-          await clickElementHandleWithRetry(tableHandle, {
-            timeout: actionTimeoutMs,
-            clickCount: 2,
-            forceOnFailure: true,
-          });
-          enteredByName = true;
-          log(`Entered table by name: ${preferredTableName}`);
-          break;
-        }
-
-        const ratio = attempt / 8;
-        log(
-          `Table name not visible yet, scrolling hall list ${attempt}/8 for ${preferredTableName}`,
-        );
-        await scrollHallList(gameHallFrame, ratio);
-      }
-
-      if (!enteredByName) {
-        throw createTableNotFoundError(preferredTableName, 8);
-      }
-    }
-
-    if (!enteredByName) {
-      const tableButton = gameHallFrame.locator(tableSelector).first();
-      log(`Entering table by selector fallback: ${tableSelector}`);
-      await clickWithRetry(tableButton, {
-        timeout: actionTimeoutMs,
-        clickCount: 2,
-        forceOnFailure: true,
-      });
-      log(`Entered table by selector fallback: ${tableSelector}`);
-    }
+    const tableButton = gameHallFrame.locator(selector).first();
+    log(`Entering table by CLICK_IN_TABLE_GAME selector: ${selector}`);
+    await clickWithRetry(tableButton, {
+      timeout: actionTimeoutMs,
+      clickCount: 2,
+      forceOnFailure: true,
+    });
+    log(`Entered table by CLICK_IN_TABLE_GAME selector: ${selector}`);
 
     await pauseWithLog(tableOpenWaitMs, "wait for selected table to open");
 
